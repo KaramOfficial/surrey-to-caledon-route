@@ -90,19 +90,24 @@ h1{font-size:2rem;font-weight:800;letter-spacing:-.02em;margin:0 0 6px}
 .jstop{font-size:.68rem;font-weight:500;color:hsl(var(--muted-foreground));white-space:nowrap;margin-top:1px}
 @media (prefers-color-scheme:dark){.jnode.missed .jwx{color:#f87171}}
 
-/* Trip weather timeline (top glance strip) */
-.tlsec{margin:0 0 16px}
-.tlhead{font-weight:700;font-size:.95rem;margin:0 2px 8px}
+/* Trip weather grid (top glance — one row per day, collapsible) */
+.tlsec{margin:0 0 16px;border:1px solid hsl(var(--border));border-radius:calc(var(--radius) + 4px);background:hsl(var(--card));overflow:hidden}
+.tlhead{display:flex;width:100%;align-items:center;gap:8px;background:none;border:0;padding:11px 14px;font-weight:700;font-size:.95rem;cursor:pointer;color:inherit;text-align:left;min-height:46px}
 .tlhead .tlhint{font-weight:500;color:hsl(var(--muted-foreground));font-size:.85rem}
-.tlscroll{overflow-x:auto;scrollbar-width:thin;-webkit-overflow-scrolling:touch;border:1px solid hsl(var(--border));border-radius:calc(var(--radius) + 4px);background:hsl(var(--card));padding:10px 12px}
-.tltrack{display:flex;min-width:min-content}
-.tlday{display:flex;align-items:flex-start;gap:12px;padding:0 14px;border-left:1px solid hsl(var(--border))}
-.tlday:first-child{border-left:0;padding-left:2px}
+.tlhead .tlchev{margin-left:auto;color:hsl(var(--muted-foreground));transition:transform .18s}
+.tlhead[aria-expanded="true"] .tlchev{transform:rotate(180deg)}
+#tlBody[hidden]{display:none}
+.tlday{display:flex;align-items:flex-start;gap:14px;padding:9px 14px;border-top:1px solid hsl(var(--border))}
+.tlrowhead{flex:none;width:150px;display:flex;flex-direction:column;align-items:flex-start;gap:3px}
+.tlroute{font-size:.74rem;font-weight:600;color:hsl(var(--muted-foreground));line-height:1.3}
+.tlrow{display:flex;align-items:flex-start;gap:12px;flex:1;min-width:0;overflow-x:auto;scrollbar-width:thin;-webkit-overflow-scrolling:touch;padding-bottom:2px}
 .tlchip{flex:none;font-size:.68rem;font-weight:800;letter-spacing:.06em;background:hsl(var(--primary));color:hsl(var(--primary-foreground));border-radius:9999px;padding:3px 9px;margin-top:1px;white-space:nowrap}
-.tlnode{display:flex;flex-direction:column;min-width:58px}
+.tlnode{flex:none;display:flex;flex-direction:column;min-width:58px}
+@media (max-width:640px){.tlrowhead{width:104px}.tlroute{font-size:.68rem}}
 .tlname{font-size:.74rem;font-weight:600;line-height:1.25;white-space:nowrap}
 .tltime{font-size:.68rem;color:hsl(var(--muted-foreground));white-space:nowrap}
 .tlwx{font-size:.78rem;font-weight:600;white-space:nowrap}
+.tlcond{font-size:.72rem;font-weight:500;color:hsl(var(--muted-foreground))}
 .tlnode.missed .tlwx{color:#b91c1c}
 @media (prefers-color-scheme:dark){.tlnode.missed .tlwx{color:#f87171}}
 
@@ -296,10 +301,10 @@ footer{margin-top:30px;font-size:.8rem;color:hsl(var(--muted-foreground));text-a
     <span class="shiftmsg" id="shiftMsg" hidden>Dates shifted — weather, sights and journey strips update to the new dates; stay prices were checked for the Mon Oct 26 start, so re-check them with Find stays.</span>
   </div>
 
-  <!-- TRIP WEATHER TIMELINE -->
-  <section class="tlsec" aria-label="Trip weather timeline">
-    <div class="tlhead">Trip weather timeline <span class="tlhint">— weather at every passing point, the whole trip at a glance</span></div>
-    <div class="tlscroll"><div class="tltrack" id="tlTrack"></div></div>
+  <!-- TRIP WEATHER GRID -->
+  <section class="tlsec" aria-label="Trip weather grid">
+    <button type="button" class="tlhead" id="tlToggle" aria-expanded="true" aria-controls="tlBody">Trip weather <span class="tlhint">— weather at every passing point, one row per day</span><span class="tlchev" aria-hidden="true">▾</span></button>
+    <div id="tlBody"><div class="tltrack" id="tlTrack"></div></div>
   </section>
 
   <!-- EXPAND TOOLBAR -->
@@ -975,6 +980,17 @@ document.querySelectorAll('.day').forEach(function (card) {
 // Category panels and the Expand toolbar. Weather cards hydrate lazily
 // (window.hydrateWx) the moment a weather panel is opened.
 (function () {
+  // Trip weather grid collapse toggle — starts open, collapses to the
+  // header bar only.
+  var tlToggle = document.getElementById('tlToggle');
+  var tlBody = document.getElementById('tlBody');
+  if (tlToggle && tlBody) {
+    tlToggle.addEventListener('click', function () {
+      var open = tlToggle.getAttribute('aria-expanded') === 'true';
+      tlToggle.setAttribute('aria-expanded', open ? 'false' : 'true');
+      tlBody.hidden = open;
+    });
+  }
   function setPanel(panel, open) {
     panel.querySelector('.panelhead').setAttribute('aria-expanded', open ? 'true' : 'false');
     panel.querySelector('.panelbody').hidden = !open;
@@ -1062,10 +1078,36 @@ document.querySelectorAll('.day').forEach(function (card) {
   }
   /* Short figure for the top timeline: icon + temp, condition suffix off. */
   function tlShort(t) { t = (t || '').split(' · ')[0].trim(); return t || '—'; }
+  /* One-word condition for the grid node, shown after the temperature.
+     From the strip figure's own word where it has one ("… · dry" → Dry),
+     else read off its icon; live figures take the wxMap label, cut to one
+     word. Same vocabulary as the strips and cards throughout. */
+  function condFromText(t) {
+    t = t || '';
+    if (t.indexOf('missed') >= 0) return '';
+    var parts = t.split(' · ');
+    if (parts.length > 1) {
+      var s = parts[1].trim();
+      if (s) return s.charAt(0).toUpperCase() + s.slice(1);
+    }
+    if (t.indexOf('☀') >= 0 || t.indexOf('🌤') >= 0) return 'Clear';
+    if (t.indexOf('🌧') >= 0) return 'Rain';
+    if (t.indexOf('🌦') >= 0) return 'Showers';
+    if (t.indexOf('🌨') >= 0) return 'Snow';
+    if (t.indexOf('🌫') >= 0) return 'Fog';
+    if (t.indexOf('⛈') >= 0) return 'Storm';
+    if (t.indexOf('⛅') >= 0 || t.indexOf('☁') >= 0) return 'Cloudy';
+    return '';
+  }
+  function wxWord(label) {
+    var map = { 'Clear': 'Clear', 'Mostly clear': 'Clear', 'Partly cloudy': 'Cloudy', 'Cloudy': 'Cloudy', 'Fog': 'Fog', 'Drizzle': 'Drizzle', 'Light rain': 'Rain', 'Rain': 'Rain', 'Snow': 'Snow', 'Showers': 'Showers', 'Snow showers': 'Snow', 'Thunderstorm': 'Storm' };
+    return map[label] || (label ? label.split(' ')[0] : '');
+  }
   function mirrorWx(node) {
     if (!node._tlWx) return;
     var w = node.querySelector('.jwx');
     node._tlWx.textContent = tlShort(w ? w.textContent : '');
+    if (node._tlCond) node._tlCond.textContent = node.dataset.cond ? ' · ' + node.dataset.cond : '';
   }
 
   var days = Array.prototype.slice.call(document.querySelectorAll('.day'));
@@ -1075,7 +1117,7 @@ document.querySelectorAll('.day').forEach(function (card) {
     card.dataset.dayidx = i;
     card.querySelectorAll('.jnode').forEach(function (n) {
       var w = n.querySelector('.jwx');
-      if (w) n.dataset.origwx = w.textContent;
+      if (w) { n.dataset.origwx = w.textContent; n.dataset.cond = condFromText(w.textContent); }
     });
     var pass = card.querySelector('.wxc-pass');
     if (pass) pass.dataset.tail = pass.textContent.replace(/^[^·]*·\s*/, '');
@@ -1099,10 +1141,21 @@ document.querySelectorAll('.day').forEach(function (card) {
     days.forEach(function (card, i) {
       var grp = document.createElement('div');
       grp.className = 'tlday';
+      var rhead = document.createElement('div');
+      rhead.className = 'tlrowhead';
       var chip = document.createElement('span');
       chip.className = 'tlchip';
-      grp.appendChild(chip);
+      rhead.appendChild(chip);
       tlChips[i] = chip;
+      var rt = document.createElement('span');
+      rt.className = 'tlroute';
+      var dr = card.querySelector('.droute');
+      rt.textContent = dr ? dr.textContent : '';
+      rhead.appendChild(rt);
+      grp.appendChild(rhead);
+      var row = document.createElement('div');
+      row.className = 'tlrow';
+      grp.appendChild(row);
       card.querySelectorAll('.jnode').forEach(function (node) {
         var tn = document.createElement('span');
         tn.className = 'tlnode' + (node.classList.contains('missed') ? ' missed' : '');
@@ -1116,11 +1169,17 @@ document.querySelectorAll('.day').forEach(function (card) {
         tm.textContent = jt ? jt.textContent : '';
         var wx = document.createElement('span');
         wx.className = 'tlwx';
+        var fig = document.createElement('span');
         var jw = node.querySelector('.jwx');
-        wx.textContent = tlShort(jw ? jw.textContent : '');
+        fig.textContent = tlShort(jw ? jw.textContent : '');
+        var cd = document.createElement('span');
+        cd.className = 'tlcond';
+        cd.textContent = node.dataset.cond ? ' · ' + node.dataset.cond : '';
+        wx.appendChild(fig); wx.appendChild(cd);
         tn.appendChild(nm); tn.appendChild(tm); tn.appendChild(wx);
-        grp.appendChild(tn);
-        node._tlWx = wx;
+        row.appendChild(tn);
+        node._tlWx = fig;
+        node._tlCond = cd;
         node._tlNode = tn;
       });
       track.appendChild(grp);
@@ -1264,6 +1323,7 @@ document.querySelectorAll('.day').forEach(function (card) {
       if (w && w.textContent === '✗ missed') w.textContent = '';
     } else {
       node.classList.add('missed');
+      node.dataset.cond = '';
       if (w) w.textContent = '✗ missed';
     }
     if (node._tlNode) node._tlNode.classList.toggle('missed', day6ISO > '2026-10-30');
@@ -1293,7 +1353,7 @@ document.querySelectorAll('.day').forEach(function (card) {
       // Back on the original plan date: restore the researched strip figures.
       card.querySelectorAll('.jnode').forEach(function (n) {
         var w = n.querySelector('.jwx');
-        if (w && n.dataset.origwx != null) { w.textContent = n.dataset.origwx; mirrorWx(n); }
+        if (w && n.dataset.origwx != null) { w.textContent = n.dataset.origwx; n.dataset.cond = condFromText(n.dataset.origwx); mirrorWx(n); }
       });
       return;
     }
@@ -1319,6 +1379,7 @@ document.querySelectorAll('.day').forEach(function (card) {
         if (best < 0) return; // out of forecast range: leave the checked figures untouched
         var m = window.wxIconFor(H.weather_code[best]);
         w.textContent = m[0] + ' ' + Math.round(H.temperature_2m[best]) + '°';
+        node.dataset.cond = wxWord(m[1]);
         mirrorWx(node);
       }, function () { /* fetch failed: leave the strip untouched */ });
     });
