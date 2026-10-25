@@ -90,6 +90,22 @@ h1{font-size:2rem;font-weight:800;letter-spacing:-.02em;margin:0 0 6px}
 .jstop{font-size:.68rem;font-weight:500;color:hsl(var(--muted-foreground));white-space:nowrap;margin-top:1px}
 @media (prefers-color-scheme:dark){.jnode.missed .jwx{color:#f87171}}
 
+/* Trip weather timeline (top glance strip) */
+.tlsec{margin:0 0 16px}
+.tlhead{font-weight:700;font-size:.95rem;margin:0 2px 8px}
+.tlhead .tlhint{font-weight:500;color:hsl(var(--muted-foreground));font-size:.85rem}
+.tlscroll{overflow-x:auto;scrollbar-width:thin;-webkit-overflow-scrolling:touch;border:1px solid hsl(var(--border));border-radius:calc(var(--radius) + 4px);background:hsl(var(--card));padding:10px 12px}
+.tltrack{display:flex;min-width:min-content}
+.tlday{display:flex;align-items:flex-start;gap:12px;padding:0 14px;border-left:1px solid hsl(var(--border))}
+.tlday:first-child{border-left:0;padding-left:2px}
+.tlchip{flex:none;font-size:.68rem;font-weight:800;letter-spacing:.06em;background:hsl(var(--primary));color:hsl(var(--primary-foreground));border-radius:9999px;padding:3px 9px;margin-top:1px;white-space:nowrap}
+.tlnode{display:flex;flex-direction:column;min-width:58px}
+.tlname{font-size:.74rem;font-weight:600;line-height:1.25;white-space:nowrap}
+.tltime{font-size:.68rem;color:hsl(var(--muted-foreground));white-space:nowrap}
+.tlwx{font-size:.78rem;font-weight:600;white-space:nowrap}
+.tlnode.missed .tlwx{color:#b91c1c}
+@media (prefers-color-scheme:dark){.tlnode.missed .tlwx{color:#f87171}}
+
 /* Sights */
 .sights{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
 .sight{width:150px;border:1px solid hsl(var(--border));border-radius:var(--radius);overflow:hidden;background:hsl(var(--card))}
@@ -280,6 +296,12 @@ footer{margin-top:30px;font-size:.8rem;color:hsl(var(--muted-foreground));text-a
     <span class="shiftmsg" id="shiftMsg" hidden>Dates shifted — weather, sights and journey strips update to the new dates; stay prices were checked for the Mon Oct 26 start, so re-check them with Find stays.</span>
   </div>
 
+  <!-- TRIP WEATHER TIMELINE -->
+  <section class="tlsec" aria-label="Trip weather timeline">
+    <div class="tlhead">Trip weather timeline <span class="tlhint">— weather at every passing point, the whole trip at a glance</span></div>
+    <div class="tlscroll"><div class="tltrack" id="tlTrack"></div></div>
+  </section>
+
   <!-- EXPAND TOOLBAR -->
   <div class="toolbar" role="group" aria-label="Expand day panels by category">
     <span class="tb-label">Expand:</span>
@@ -288,6 +310,7 @@ footer{margin-top:30px;font-size:.8rem;color:hsl(var(--muted-foreground));text-a
     <button type="button" class="tbtn" data-expand="map" aria-pressed="false">Maps only</button>
     <button type="button" class="tbtn" data-expand="weather" aria-pressed="false">Weather only</button>
     <button type="button" class="tbtn" data-expand="sights" aria-pressed="false">Sights only</button>
+    <button type="button" class="tbtn" data-expand="timelines" aria-pressed="false">Timelines only</button>
     <button type="button" class="tbtn" data-expand="none" aria-pressed="false">Collapse all</button>
   </div>
 
@@ -1014,6 +1037,8 @@ document.querySelectorAll('.day').forEach(function (card) {
   var ORIG = '2026-10-26';
   var WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   var MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  var WDF = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  var MOF = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   var FR = { '¼': 0.25, '½': 0.5, '¾': 0.75 };
   var curStart = pISO(ORIG);
 
@@ -1022,6 +1047,26 @@ document.querySelectorAll('.day').forEach(function (card) {
   function addD(d, n) { return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n); }
   function fmtD(d) { return WD[d.getDay()] + ' ' + MO[d.getMonth()] + ' ' + d.getDate(); }
   function fmtShort(d) { return MO[d.getMonth()] + ' ' + d.getDate(); }
+
+  /* Date-aware Google Weather link: Google can't deep-link an hour, but
+     the query carries the city + the card's CURRENT travel date, so its
+     card opens on that date's forecast instead of today's weather. */
+  function parseCity(href) {
+    var m = (href || '').match(/[?&]q=weather\+(.+)$/);
+    if (!m) return '';
+    return m[1].split('+').join(' ').replace(/\s+(BC|AB|SK|MB|ON)$/, '');
+  }
+  function gwxURL(city, d) {
+    return 'https://www.google.com/search?q=weather+in+' + city.split(' ').join('+') +
+      '+on+' + WDF[d.getDay()] + '%2C+' + MOF[d.getMonth()] + '+' + d.getDate() + '%2C+' + d.getFullYear();
+  }
+  /* Short figure for the top timeline: icon + temp, condition suffix off. */
+  function tlShort(t) { t = (t || '').split(' · ')[0].trim(); return t || '—'; }
+  function mirrorWx(node) {
+    if (!node._tlWx) return;
+    var w = node.querySelector('.jwx');
+    node._tlWx.textContent = tlShort(w ? w.textContent : '');
+  }
 
   var days = Array.prototype.slice.call(document.querySelectorAll('.day'));
 
@@ -1038,9 +1083,49 @@ document.querySelectorAll('.day').forEach(function (card) {
     if (wb) { wb.dataset.origdate = wb.dataset.date; wb.dataset.tail = (wb.dataset.when || '').replace(/^[^·]*·\s*/, ''); }
     var wc = card.querySelector('.wxcard');
     if (wc) wc.dataset.origdate = wc.dataset.date;
+    if (wc) { var gl0 = wc.querySelector('.wxc-g'); if (gl0) wc.dataset.gcity = parseCity(gl0.getAttribute('href')); }
+    if (wb && wb.dataset.gwx) wb.dataset.gcity = parseCity(wb.dataset.gwx);
     var fg = card.querySelector('.wxfigs strong');
     if (fg) fg.dataset.origlabel = fg.textContent;
   });
+
+  /* ---------- top trip timeline: built from the strips' own nodes -------
+     Same passing points, same order — each timeline figure is a mirror of
+     its strip node's figure (mirrorWx), so the two can never disagree. */
+  var tlChips = [];
+  (function buildTimeline() {
+    var track = document.getElementById('tlTrack');
+    if (!track) return;
+    days.forEach(function (card, i) {
+      var grp = document.createElement('div');
+      grp.className = 'tlday';
+      var chip = document.createElement('span');
+      chip.className = 'tlchip';
+      grp.appendChild(chip);
+      tlChips[i] = chip;
+      card.querySelectorAll('.jnode').forEach(function (node) {
+        var tn = document.createElement('span');
+        tn.className = 'tlnode' + (node.classList.contains('missed') ? ' missed' : '');
+        var nm = document.createElement('span');
+        nm.className = 'tlname';
+        var jn = node.querySelector('.jname');
+        nm.textContent = jn ? jn.textContent : '';
+        var tm = document.createElement('span');
+        tm.className = 'tltime';
+        var jt = node.querySelector('.jtime');
+        tm.textContent = jt ? jt.textContent : '';
+        var wx = document.createElement('span');
+        wx.className = 'tlwx';
+        var jw = node.querySelector('.jwx');
+        wx.textContent = tlShort(jw ? jw.textContent : '');
+        tn.appendChild(nm); tn.appendChild(tm); tn.appendChild(wx);
+        grp.appendChild(tn);
+        node._tlWx = wx;
+        node._tlNode = tn;
+      });
+      track.appendChild(grp);
+    });
+  })();
 
   /* ---------- day totals: drive (header figure) + stops (strip) + day --- */
   function parseAmt(s) {
@@ -1181,6 +1266,8 @@ document.querySelectorAll('.day').forEach(function (card) {
       node.classList.add('missed');
       if (w) w.textContent = '✗ missed';
     }
+    if (node._tlNode) node._tlNode.classList.toggle('missed', day6ISO > '2026-10-30');
+    mirrorWx(node);
   }
 
   /* ---------- journey strips: live node weather from the shared fetch --- */
@@ -1206,7 +1293,7 @@ document.querySelectorAll('.day').forEach(function (card) {
       // Back on the original plan date: restore the researched strip figures.
       card.querySelectorAll('.jnode').forEach(function (n) {
         var w = n.querySelector('.jwx');
-        if (w && n.dataset.origwx != null) w.textContent = n.dataset.origwx;
+        if (w && n.dataset.origwx != null) { w.textContent = n.dataset.origwx; mirrorWx(n); }
       });
       return;
     }
@@ -1232,6 +1319,7 @@ document.querySelectorAll('.day').forEach(function (card) {
         if (best < 0) return; // out of forecast range: leave the checked figures untouched
         var m = window.wxIconFor(H.weather_code[best]);
         w.textContent = m[0] + ' ' + Math.round(H.temperature_2m[best]) + '°';
+        mirrorWx(node);
       }, function () { /* fetch failed: leave the strip untouched */ });
     });
   }
@@ -1273,12 +1361,13 @@ document.querySelectorAll('.day').forEach(function (card) {
       var d = addD(curStart, i), isoD = tISO(d);
       var dn = card.querySelector('.dnum');
       if (dn) dn.textContent = 'Day ' + (i + 1) + ' · ' + fmtD(d) + (i === 1 ? ' ★' : '');
+      if (tlChips[i]) tlChips[i].textContent = (WD[d.getDay()] + ' ' + d.getDate()).toUpperCase();
       var pass = card.querySelector('.wxc-pass');
       if (pass && pass.dataset.tail) pass.textContent = 'You pass here: ' + fmtD(d) + ' · ' + pass.dataset.tail;
       var wb = card.querySelector('.wxbtn');
-      if (wb && wb.dataset.tail) { wb.dataset.date = isoD; wb.dataset.when = fmtD(d) + ' · ' + wb.dataset.tail; }
+      if (wb && wb.dataset.tail) { wb.dataset.date = isoD; wb.dataset.when = fmtD(d) + ' · ' + wb.dataset.tail; if (wb.dataset.gcity) wb.dataset.gwx = gwxURL(wb.dataset.gcity, d); }
       var wc = card.querySelector('.wxcard');
-      if (wc) { wc.dataset.date = isoD; if (window.refreshWxCard) window.refreshWxCard(wc); }
+      if (wc) { wc.dataset.date = isoD; if (window.refreshWxCard) window.refreshWxCard(wc); var gl2 = wc.querySelector('.wxc-g'); if (gl2 && wc.dataset.gcity) gl2.href = gwxURL(wc.dataset.gcity, d); }
       var fg = card.querySelector('.wxfigs strong');
       if (fg && fg.dataset.origlabel) fg.textContent = shifted ? 'For the original Oct 26 start (checked Oct 24):' : fg.dataset.origlabel;
       card.dataset.stripStale = '1';
@@ -1296,6 +1385,12 @@ document.querySelectorAll('.day').forEach(function (card) {
     });
     if (tblNote) tblNote.hidden = !shifted;
     refreshVisibleStrips();
+    // The top trip timeline is always on screen, so on a shift the hidden
+    // days refresh their figures too — same shared fetch, same updateStrip
+    // path, so the timeline and the strips always show the same figures.
+    days.forEach(function (card) {
+      if (card.dataset.stripStale) { updateStrip(card); card.dataset.stripStale = ''; }
+    });
   }
 
   var input = document.getElementById('startDate');
